@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "skijamod",
+  "version": "${version}",
+  "name": "skijamod",
+  "description": "An api to make using skija easy across rendering backends",
+  "authors": ["Marc3D"],
+  "contact": {
+    "email": "marc@marc3d.dev"
+  },
+  "contributors": ["LilIndigo1"],
+  "license": "LGPL-3.0",
+  "icon": "assets/skijamod/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "marc3d.skijamod.client.SkijaModClient"
+    ]
+  },
+  "mixins": [
+    "skijamod.mixins.json"
+  ],
+  "accessWidener": "skijamod.accesswidener",
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": ">=${minecraft_version}"
+  }
+}
