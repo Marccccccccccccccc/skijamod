@@ -3,8 +3,11 @@ plugins {
     id 'maven-publish'
 }
 
-version = project.mod_version
-group = project.maven_group
+def resolvedVersion = providers.gradleProperty('version').orElse(project.mod_version).get()
+def resolvedGroup = providers.gradleProperty('group').orElse(project.maven_group).get()
+
+version = resolvedVersion
+group = resolvedGroup
 
 base {
     archivesName = project.archives_base_name
