@@ -14,7 +14,7 @@
   "environment": "client",
   "entrypoints": {
     "client": [
-      "marc3d.skijamod.client.SkijaModClient"
+      "marc3d.skijamod.client.SkijaMod"
     ]
   },
   "mixins": [

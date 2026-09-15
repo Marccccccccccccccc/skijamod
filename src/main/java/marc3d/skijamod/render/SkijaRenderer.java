@@ -15,7 +15,7 @@ import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static marc3d.skijamod.client.SkijaModClient.LOG;
+import static marc3d.skijamod.client.SkijaMod.LOG;
 @SuppressWarnings("unused")
 @UtilityClass
 public final class SkijaRenderer {

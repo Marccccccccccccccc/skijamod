@@ -1,5 +1,6 @@
 package marc3d.skijamod.render;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.opengl.GlTexture;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderPass;
@@ -20,8 +21,8 @@ import org.lwjgl.vulkan.VK11;
 import java.util.Optional;
 import java.util.function.Consumer;
 
-import static marc3d.skijamod.client.SkijaModClient.LOG;
-import static marc3d.skijamod.client.SkijaModClient.mc;
+import static marc3d.skijamod.client.SkijaMod.LOG;
+import static marc3d.skijamod.client.SkijaMod.mc;
 
 public final class SkijaSurfaceManager {
     private static final SkijaOpenGlState glState = new SkijaOpenGlState();
@@ -99,7 +100,11 @@ public final class SkijaSurfaceManager {
             }
 
             if (isGpuBackend && directContext != null) {
-                directContext.flushAndSubmit(false);
+                if (backendType == RenderingBackend.VULKAN && surface != null) {
+                    directContext.flushAndSubmit(surface, true);
+                } else {
+                    directContext.flushAndSubmit(false);
+                }
             }
         } catch (Throwable t) {
             t.printStackTrace();
@@ -260,19 +265,19 @@ public final class SkijaSurfaceManager {
                             getProcAddr, getProcAddr2, VK11.VK_API_VERSION_1_1
                     );
                 } catch (Throwable t) {
-                    LOG.warn(" DirectContext.makeVulkan failed: {}", t.getMessage());
+                    t.printStackTrace();
                 }
             }
             if (directContext == null) return;
 
-            int vkFormat = VK10.VK_FORMAT_R8G8B8A8_UNORM;
-            int imageUsageFlags = 23;
+            int vkFormat = toVulkanFormat(vkTexture.getFormat());
+            int imageUsageFlags = toVulkanImageUsageFlags(vkTexture.usage());
 
             backendRenderTarget = BackendRenderTarget.makeVulkan(
                     w, h,
                     vkTexture.vkImage(),
-                    0,
-                    1,
+                    VK10.VK_IMAGE_TILING_OPTIMAL,
+                    VK10.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     vkFormat,
                     imageUsageFlags,
                     1,
@@ -282,10 +287,10 @@ public final class SkijaSurfaceManager {
             surface = Surface.wrapBackendRenderTarget(
                     directContext,
                     backendRenderTarget,
-                    SurfaceOrigin.BOTTOM_LEFT,
+                    SurfaceOrigin.TOP_LEFT,
                     ColorType.RGBA_8888,
-                    null,
-                    new SurfaceProps(PixelGeometry.RGB_H)
+                    ColorSpace.getSRGB(),
+                    new SurfaceProps(PixelGeometry.UNKNOWN)
             );
 
             isGpuBackend = true;
@@ -303,8 +308,8 @@ public final class SkijaSurfaceManager {
                 return (VulkanDevice) gpuDevice;
             }
         }
-        catch (Throwable ignored) {
-
+        catch (Throwable t) {
+            t.printStackTrace();
         }
         return null;
     }
@@ -322,5 +327,51 @@ public final class SkijaSurfaceManager {
         lastVkImage = 0L;
         isGpuBackend = false;
         backendType = RenderingBackend.NONE;
+    }
+
+    private static int toVulkanFormat(GpuFormat format) {
+        if (format == null) {
+            return VK10.VK_FORMAT_R8G8B8A8_UNORM;
+        }
+
+        return switch (format) {
+            case R8_UNORM -> VK10.VK_FORMAT_R8_UNORM;
+            case RG8_UNORM -> VK10.VK_FORMAT_R8G8_UNORM;
+            case RGBA8_UNORM -> VK10.VK_FORMAT_R8G8B8A8_UNORM;
+            case R16_FLOAT -> VK10.VK_FORMAT_R16_SFLOAT;
+            case RG16_FLOAT -> VK10.VK_FORMAT_R16G16_SFLOAT;
+            case RGBA16_FLOAT -> VK10.VK_FORMAT_R16G16B16A16_SFLOAT;
+            case R32_FLOAT -> VK10.VK_FORMAT_R32_SFLOAT;
+            case RG32_FLOAT -> VK10.VK_FORMAT_R32G32_SFLOAT;
+            case RGBA32_FLOAT -> VK10.VK_FORMAT_R32G32B32A32_SFLOAT;
+            case RGB10A2_UNORM -> VK10.VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+            default -> VK10.VK_FORMAT_R8G8B8A8_UNORM;
+        };
+    }
+
+    private static int toVulkanImageUsageFlags(int usage) {
+        int flags = 0;
+
+        if ((usage & GpuTexture.USAGE_COPY_SRC) != 0) {
+            flags |= VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        }
+        if ((usage & GpuTexture.USAGE_COPY_DST) != 0) {
+            flags |= VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        }
+        if ((usage & GpuTexture.USAGE_TEXTURE_BINDING) != 0) {
+            flags |= VK10.VK_IMAGE_USAGE_SAMPLED_BIT;
+        }
+        if ((usage & GpuTexture.USAGE_RENDER_ATTACHMENT) != 0) {
+            flags |= VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+
+        if (flags == 0) {
+            flags = VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                    | VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                    | VK10.VK_IMAGE_USAGE_SAMPLED_BIT
+                    | VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+
+        return flags;
     }
 }
