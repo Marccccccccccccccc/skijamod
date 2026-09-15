@@ -2,25 +2,19 @@ plugins {
     id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT'
     id 'maven-publish'
 }
-
 def resolvedVersion = providers.gradleProperty('version').orElse(project.mod_version).get()
 def resolvedGroup = providers.gradleProperty('group').orElse(project.maven_group).get()
-
 version = resolvedVersion
 group = resolvedGroup
-
 base {
     archivesName = project.archives_base_name
 }
-
 loom {
-    accessWidenerPath = file("src/main/resources/skijamod.accesswidener")
+    accessWidenerPath = file('src/main/resources/skijamod.accesswidener')
 }
-
 repositories {
     mavenCentral()
 }
-
 dependencies {
     implementation "io.github.humbleui:types:0.2.0"
     include "io.github.humbleui:types:0.2.0"
@@ -31,28 +25,26 @@ dependencies {
     compileOnly "org.projectlombok:lombok:1.18.38"
     annotationProcessor "org.projectlombok:lombok:1.18.38"
 }
-
 processResources {
-    inputs.property "version", project.version
-    inputs.property "minecraft_version", project.minecraft_version
-    inputs.property "loader_version", project.loader_version
-    filteringCharset "UTF-8"
-
-    filesMatching("fabric.mod.json") {
-        expand "version": project.version,
-                "minecraft_version": project.minecraft_version,
-                "loader_version": project.loader_version
+    inputs.property 'version', project.version
+    inputs.property 'minecraft_version', project.minecraft_version
+    inputs.property 'loader_version', project.loader_version
+    filteringCharset 'UTF-8'
+    filesMatching('fabric.mod.json') {
+        expand(
+                version: project.version,
+                minecraft_version: project.minecraft_version,
+                loader_version: project.loader_version
+        )
     }
 }
-
 def targetJavaVersion = 25
 tasks.withType(JavaCompile).configureEach {
-    it.options.encoding = "UTF-8"
+    it.options.encoding = 'UTF-8'
     if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
         it.options.release.set(targetJavaVersion)
     }
 }
-
 java {
     def javaVersion = JavaVersion.toVersion(targetJavaVersion)
     if (JavaVersion.current() < javaVersion) {
@@ -60,9 +52,18 @@ java {
     }
     withSourcesJar()
 }
-
 jar {
-    from("LICENSE") {
+    from('LICENSE') {
         rename { "${it}_${project.archives_base_name}" }
+    }
+}
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            groupId = resolvedGroup
+            artifactId = project.archives_base_name
+            version = resolvedVersion
+        }
     }
 }
