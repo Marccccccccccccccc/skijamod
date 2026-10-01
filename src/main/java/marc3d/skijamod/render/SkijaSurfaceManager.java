@@ -6,6 +6,7 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import io.github.humbleui.skija.*;
@@ -14,9 +15,8 @@ import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
-import org.lwjgl.vulkan.VK;
-import org.lwjgl.vulkan.VK10;
-import org.lwjgl.vulkan.VK11;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.*;
 
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -57,8 +57,12 @@ public final class SkijaSurfaceManager {
         int h = color.getHeight(0);
         if (w <= 0 || h <= 0) return;
 
-        boolean isOpenGL = color instanceof GlTexture;
+        if (color instanceof VulkanGpuTexture vkTex) {
+            drawVulkan(action, vkTex, w, h);
+            return;
+        }
 
+        boolean isOpenGL = color instanceof GlTexture;
         if (isOpenGL) {
             glState.push();
         }
@@ -68,11 +72,7 @@ public final class SkijaSurfaceManager {
             if (surface == null) return;
 
             if (isGpuBackend && directContext != null) {
-                if (isOpenGL) {
-                    directContext.resetGLAll();
-                } else {
-                    directContext.resetAll();
-                }
+                directContext.resetGLAll();
             }
 
             try {
@@ -83,7 +83,6 @@ public final class SkijaSurfaceManager {
                 try {
                     guiScale = (float) mc.getWindow().getGuiScale();
                 } catch (Throwable ignored) {
-
                 }
 
                 if (guiScale > 0.01f) {
@@ -96,25 +95,20 @@ public final class SkijaSurfaceManager {
                     canvas.restore();
                 }
             } catch (Exception e) {
-                LOG.error(" Skija draw callback threw", e);
+                LOG.error("Skija draw callback threw", e);
             }
 
             if (isGpuBackend && directContext != null) {
-                if (backendType == RenderingBackend.VULKAN && surface != null) {
-                    directContext.flushAndSubmit(surface, true);
-                } else {
-                    directContext.flushAndSubmit(false);
-                }
+                directContext.flushAndSubmit(false);
             }
         } catch (Throwable t) {
-            t.printStackTrace();
+            LOG.error("Skija GL draw failed", t);
         } finally {
             if (isOpenGL) {
                 glState.pop();
             }
         }
     }
-
     public void drawDirect(Consumer<Canvas> action) {
         RenderTarget main = mc.gameRenderer.mainRenderTarget();
 
@@ -327,6 +321,67 @@ public final class SkijaSurfaceManager {
         lastVkImage = 0L;
         isGpuBackend = false;
         backendType = RenderingBackend.NONE;
+    }
+    private void drawVulkan(Consumer<Canvas> action, VulkanGpuTexture tex, int w, int h) {
+        VulkanDevice dev = findVulkanDevice();
+        if (dev == null) return;
+        VulkanCommandEncoder encoder = dev.createCommandEncoder();
+
+        // Get Blaze3D's pending commands (incl. texture init barriers) ahead of Skia in the queue.
+        // Must not be called inside a render pass.
+        encoder.submit();
+
+        ensureDirectSurface(tex, w, h);
+        if (surface == null) return;
+
+        boolean flushed = false;
+        try {
+            directContext.resetAll();
+            Canvas canvas = surface.getCanvas();
+            canvas.save();
+            try {
+                float guiScale = (float) mc.getWindow().getGuiScale();
+                if (guiScale > 0.01f) canvas.scale(guiScale, guiScale);
+                action.accept(canvas);
+            } finally {
+                canvas.restore();
+            }
+            directContext.flushAndSubmit(surface, true); // blocks until Skia's work is done
+            flushed = true;
+        } catch (Throwable t) {
+            LOG.error("Skija Vulkan draw failed", t);
+        } finally {
+            // Drop the wrapper every frame so Skia's cached layout can't go stale.
+            cleanupGpuResources();
+        }
+
+        if (flushed) {
+            transitionToGeneral(encoder, tex);
+        }
+    }
+
+    private static void transitionToGeneral(VulkanCommandEncoder encoder, VulkanGpuTexture tex) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkCommandBuffer cb = encoder.allocateAndBeginTransientCommandBuffer();
+
+            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default();
+            barrier.oldLayout(VK10.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL); // where Skia leaves it
+            barrier.newLayout(VK10.VK_IMAGE_LAYOUT_GENERAL);                  // what Blaze3D expects
+            barrier.srcAccessMask(VK10.VK_ACCESS_MEMORY_WRITE_BIT);
+            barrier.dstAccessMask(VK10.VK_ACCESS_MEMORY_READ_BIT | VK10.VK_ACCESS_MEMORY_WRITE_BIT);
+            barrier.srcQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED);
+            barrier.dstQueueFamilyIndex(VK10.VK_QUEUE_FAMILY_IGNORED);
+            barrier.image(tex.vkImage());
+            barrier.subresourceRange().set(VK10.VK_IMAGE_ASPECT_COLOR_BIT, 0, tex.getMipLevels(), 0, 1);
+
+            VK10.vkCmdPipelineBarrier(cb,
+                    VK10.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    VK10.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                    0, null, null, barrier);
+            VK10.vkEndCommandBuffer(cb);
+
+            encoder.execute(cb); // goes into Blaze3D's current submission
+        }
     }
 
     private static int toVulkanFormat(GpuFormat format) {
