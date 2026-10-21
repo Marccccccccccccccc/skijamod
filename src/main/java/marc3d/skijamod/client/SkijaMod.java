@@ -25,6 +25,10 @@ public class SkijaMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        if (fl.isModLoaded("connector")) {
+            LOG.info("Connector detected, disabling SkijaMod");
+            return;
+        }
         LOG.info("Initializing SkijaMod");
         try {
             Path dir = new File(FOLDER, "libs").toPath();
